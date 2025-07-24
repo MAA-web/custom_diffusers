@@ -190,6 +190,11 @@ class FluxTransformerBlock(nn.Module):
         return encoder_hidden_states, hidden_states
 
 
+################################################
+#      Main one I guess
+################################################
+
+
 class FluxTransformer2DModel(
     ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin, FluxTransformer2DLoadersMixin, CacheMixin
 ):
@@ -404,19 +409,19 @@ class FluxTransformer2DModel(
         if self.original_attn_processors is not None:
             self.set_attn_processor(self.original_attn_processors)
 
-    def forward(
+    def forward(             ### This is the function that is called to denoise the image
         self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor = None,
-        pooled_projections: torch.Tensor = None,
-        timestep: torch.LongTensor = None,
-        img_ids: torch.Tensor = None,
-        txt_ids: torch.Tensor = None,
-        guidance: torch.Tensor = None,
-        joint_attention_kwargs: Optional[Dict[str, Any]] = None,
+        hidden_states: torch.Tensor,#
+        encoder_hidden_states: torch.Tensor = None,#
+        pooled_projections: torch.Tensor = None,#
+        timestep: torch.LongTensor = None,#
+        img_ids: torch.Tensor = None,#
+        txt_ids: torch.Tensor = None,#
+        guidance: torch.Tensor = None,#
+        joint_attention_kwargs: Optional[Dict[str, Any]] = None,#
         controlnet_block_samples=None,
         controlnet_single_block_samples=None,
-        return_dict: bool = True,
+        return_dict: bool = True,#
         controlnet_blocks_repeat: bool = False,
     ) -> Union[torch.Tensor, Transformer2DModelOutput]:
         """
@@ -494,7 +499,18 @@ class FluxTransformer2DModel(
             ip_hidden_states = self.encoder_hid_proj(ip_adapter_image_embeds)
             joint_attention_kwargs.update({"ip_hidden_states": ip_hidden_states})
 
-        for index_block, block in enumerate(self.transformer_blocks):
+
+############################################################
+############################################################
+############################################################
+##              Main loop starts here
+############################################################
+############################################################
+############################################################
+
+
+        ## This is the main loop that goes through all the transformer blocks and gets the results
+        for index_block, block in enumerate(self.transformer_blocks):   ## double transformer blocks
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 encoder_hidden_states, hidden_states = self._gradient_checkpointing_func(
                     block,
@@ -505,6 +521,7 @@ class FluxTransformer2DModel(
                 )
 
             else:
+                print(f"Custom Diffuser - {__file__} - Processing block {index_block + 1}/{len(self.transformer_blocks)}")
                 encoder_hidden_states, hidden_states = block(
                     hidden_states=hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
@@ -512,6 +529,7 @@ class FluxTransformer2DModel(
                     image_rotary_emb=image_rotary_emb,
                     joint_attention_kwargs=joint_attention_kwargs,
                 )
+                print(f"Custom Diffuser - {__file__} - Encoder hidden states shape: {encoder_hidden_states.shape}")
 
             # controlnet residual
             if controlnet_block_samples is not None:
@@ -524,8 +542,12 @@ class FluxTransformer2DModel(
                     )
                 else:
                     hidden_states = hidden_states + controlnet_block_samples[index_block // interval_control]
+        
         hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
 
+
+        # This is the loop that goes through all the single transformer blocks and gets the results
+        ## Single transformer blocks
         for index_block, block in enumerate(self.single_transformer_blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 hidden_states = self._gradient_checkpointing_func(
