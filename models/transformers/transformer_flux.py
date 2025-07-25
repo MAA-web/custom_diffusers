@@ -93,6 +93,8 @@ class FluxSingleTransformerBlock(nn.Module):
             **joint_attention_kwargs,
         )
 
+        print(f"Custom Diffuser - {__file__} - Attention output shape: {attn_output.shape}")
+
         hidden_states = torch.cat([attn_output, mlp_hidden_states], dim=2)
         gate = gate.unsqueeze(1)
         hidden_states = gate * self.proj_out(hidden_states)
@@ -100,6 +102,8 @@ class FluxSingleTransformerBlock(nn.Module):
         if hidden_states.dtype == torch.float16:
             hidden_states = hidden_states.clip(-65504, 65504)
 
+        print(f"Custom Diffuser - {__file__} - Hidden states shape: {hidden_states.shape}")
+        
         return hidden_states
 
 
@@ -141,12 +145,16 @@ class FluxTransformerBlock(nn.Module):
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        
         norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, emb=temb)
 
         norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = self.norm1_context(
             encoder_hidden_states, emb=temb
         )
         joint_attention_kwargs = joint_attention_kwargs or {}
+        
+        print(f"Custom Diffuser - {__file__} - DOUBLE joint attention kwargs: {joint_attention_kwargs}")
+        
         # Attention.
         attention_outputs = self.attn(
             hidden_states=norm_hidden_states,
@@ -186,6 +194,9 @@ class FluxTransformerBlock(nn.Module):
         encoder_hidden_states = encoder_hidden_states + c_gate_mlp.unsqueeze(1) * context_ff_output
         if encoder_hidden_states.dtype == torch.float16:
             encoder_hidden_states = encoder_hidden_states.clip(-65504, 65504)
+
+        print(f"Custom Diffuser - {__file__} - DOUBLE Encoder hidden states shape: {encoder_hidden_states.shape}")
+        print(f"Custom Diffuser - {__file__} - DOUBLE Hidden states shape: {hidden_states.shape}")
 
         return encoder_hidden_states, hidden_states
 
@@ -290,6 +301,7 @@ class FluxTransformer2DModel(
             # print(f"  ff.net[0].weight: {block.ff.net[0].weight.data}")
             # print(f"  ff.net[2].weight: {block.ff.net[2].weight.data}")
 
+        #  single transformer blocks
 
         self.single_transformer_blocks = nn.ModuleList(
             [
@@ -575,34 +587,6 @@ class FluxTransformer2DModel(
                 )
 
 
-
-
-        for index_block, block in enumerate(self.single_transformer_blocks):
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                hidden_states = self._gradient_checkpointing_func(
-                    block,
-                    hidden_states,
-                    temb,
-                    image_rotary_emb,
-                )
-
-            else:
-                hidden_states = block(
-                    hidden_states=hidden_states,
-                    temb=temb,
-                    image_rotary_emb=image_rotary_emb,
-                    joint_attention_kwargs=joint_attention_kwargs,
-                )
-
-            # controlnet residual
-            if controlnet_single_block_samples is not None:
-                interval_control = len(self.single_transformer_blocks) / len(controlnet_single_block_samples)
-                interval_control = int(np.ceil(interval_control))
-                hidden_states[:, encoder_hidden_states.shape[1] :, ...] = (
-                    hidden_states[:, encoder_hidden_states.shape[1] :, ...]
-                    + controlnet_single_block_samples[index_block // interval_control]
-                )
-
         hidden_states = hidden_states[:, encoder_hidden_states.shape[1] :, ...]
 
         hidden_states = self.norm_out(hidden_states, temb)
@@ -614,5 +598,5 @@ class FluxTransformer2DModel(
 
         if not return_dict:
             return (output,)
-
+        print(f"Custom Diffuser - {__file__} - Output shape: {output.shape}")
         return Transformer2DModelOutput(sample=output)
