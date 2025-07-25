@@ -602,6 +602,8 @@ class Attention(nn.Module):
             )
         cross_attention_kwargs = {k: w for k, w in cross_attention_kwargs.items() if k in attn_parameters}
 
+        print(f"Using attention processor: {self.processor.__class__.__name__}")
+
         return self.processor(
             self,
             hidden_states,
